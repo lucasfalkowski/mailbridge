@@ -1,0 +1,17 @@
+/node_modules
+.DS_Store
+/dist
+/build
+/coverage
+/logs
+/tmp
+/test-results
+/test-results-*/
+.wrangler
+wrangler.jsonc
+wrangler.local.jsonc
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*

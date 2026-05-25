@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "email-router-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-05-08",
+
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "vars": {
+    "FROM_NAME": "Example notifications",
+    "FROM_EMAIL": "noreply@example.com",
+    "MAILBOX_CONFIG": {
+      "billing": {
+        "address": "billing@example.com",
+        "defaultRecipients": ["billing-team@example.com"],
+        "adminRecipients": ["billing-admin@example.com"],
+        "adminSubjectFilters": ["payment failed", "update required"]
+      },
+      "support": {
+        "address": "support@example.com",
+        "defaultRecipients": ["support-team@example.com"],
+        "adminRecipients": ["support-admin@example.com"],
+        "adminSubjectFilters": []
+      }
+    }
+  },
+
+  "secrets": {
+    "required": ["RESEND_API_KEY"]
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}
