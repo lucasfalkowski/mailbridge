@@ -67,6 +67,22 @@ test('buildEmailPayloads prefers the original reply-to address', async () => {
   assert.equal(result[0].payload.reply_to, 'helpdesk@example.com');
 });
 
+test('buildEmailPayloads rejects invalid configured sender addresses', async () => {
+  await assert.rejects(
+    () => buildEmailPayloads(
+      {
+        from: { address: 'sender@example.com' },
+        subject: 'Hello',
+        text: 'Plain text',
+      },
+      ['one@example.com'],
+      { FROM_EMAIL: 'not-an-email' },
+      { rawSize: 1234 },
+    ),
+    /FROM_EMAIL contains invalid email address: not-an-email/,
+  );
+});
+
 test('htmlToText decodes common named and numeric entities', () => {
   assert.equal(
     htmlToText('<p>Tom &amp; Jerry&nbsp;&copy;</p><p>Euro: &#x20AC;</p>'),
@@ -76,4 +92,23 @@ test('htmlToText decodes common named and numeric entities', () => {
 
 test('htmlToText preserves unknown entities', () => {
   assert.equal(htmlToText('<p>Keep &unknown; intact</p>'), 'Keep &unknown; intact');
+});
+
+test('htmlToText strips non-content HTML before producing fallback text', () => {
+  assert.equal(
+    htmlToText(`
+      <html>
+        <head><title>Hidden title</title></head>
+        <style>.hidden { display: none; }</style>
+        <script>alert("hidden")</script>
+        <!-- hidden comment -->
+        <body>
+          <h1>Invoice update</h1>
+          <p>Hello <strong>team</strong></p>
+          <ul><li>Review payment</li><li>Reply today</li></ul>
+        </body>
+      </html>
+    `),
+    'Invoice update\n\nHello team\n\n- Review payment\n- Reply today',
+  );
 });

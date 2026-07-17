@@ -34,7 +34,47 @@ function decodeHtmlEntities(value) {
 
 export function htmlToText(html = '') {
   if (!html) return '';
-  const withBreaks = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n');
-  const stripped = withBreaks.replace(/<[^>]+>/g, '');
-  return decodeHtmlEntities(stripped).replace(/\n{3,}/g, '\n\n').trim();
+
+  const blockTags = [
+    'address',
+    'article',
+    'aside',
+    'blockquote',
+    'div',
+    'footer',
+    'form',
+    'h[1-6]',
+    'header',
+    'main',
+    'nav',
+    'ol',
+    'p',
+    'pre',
+    'section',
+    'table',
+    'ul',
+  ].join('|');
+
+  const withStructure = String(html)
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<hr\b[^>]*\/?>/gi, '\n')
+    .replace(new RegExp(`</(?:${blockTags})>`, 'gi'), '\n\n')
+    .replace(/<li\b[^>]*>/gi, '\n- ')
+    .replace(/<\/li>/gi, '')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/t[dh]>/gi, '\t');
+
+  const stripped = withStructure.replace(/<[^>]+>/g, '');
+
+  return decodeHtmlEntities(stripped)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => line.replace(/[ \t\f\v]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

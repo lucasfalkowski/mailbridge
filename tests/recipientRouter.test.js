@@ -23,6 +23,13 @@ test('parseEmailList extracts and validates display-name addresses', () => {
   ]);
 });
 
+test('parseEmailList supports quoted display names with commas', () => {
+  assert.deepEqual(parseEmailList('"Doe, John" <john@example.com>, jane@example.com'), [
+    'john@example.com',
+    'jane@example.com',
+  ]);
+});
+
 test('parseEmailList rejects malformed addresses', () => {
   assert.throws(
     () => parseEmailList('valid@example.com, invalid-address', 'MAILBOX_CONFIG.billing.defaultRecipients'),

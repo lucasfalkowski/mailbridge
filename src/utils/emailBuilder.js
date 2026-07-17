@@ -32,6 +32,19 @@ function getReplyToAddress(parsed) {
   return getAddress(parsed.replyTo) || getAddress(parsed.from);
 }
 
+function assertValidEmailAddress(value, fieldName) {
+  const address = String(value || '').trim();
+  const isValid =
+    address.length <= 254 &&
+    /^[^\s@<>]+@[^\s@<>.]+(?:\.[^\s@<>.]+)+$/.test(address);
+
+  if (!isValid) {
+    throw new Error(`${fieldName} contains invalid email address: ${value}`);
+  }
+
+  return address;
+}
+
 async function hashValue(value) {
   const data = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -46,16 +59,17 @@ function formatFromAddress(env) {
   if (!fromEmail) {
     throw new Error('FROM_EMAIL is required');
   }
+  const validatedFromEmail = assertValidEmailAddress(fromEmail, 'FROM_EMAIL');
 
   const fromName = env.FROM_NAME?.trim();
   if (!fromName) {
-    return fromEmail;
+    return validatedFromEmail;
   }
 
   const escapedName = fromName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const needsQuotes = /[\s",<>()[\]:;@\\]/.test(fromName);
 
-  return `${needsQuotes ? `"${escapedName}"` : escapedName} <${fromEmail}>`;
+  return `${needsQuotes ? `"${escapedName}"` : escapedName} <${validatedFromEmail}>`;
 }
 
 async function buildIdempotencyKey(parsed, message, recipient, index) {

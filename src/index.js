@@ -1,7 +1,8 @@
 import PostalMime from 'postal-mime';
 import { buildEmailPayloads } from './utils/emailBuilder.js';
 import { routeRecipientsBySubject } from './utils/recipientRouter.js';
-import { sendEmailBatch } from './handlers/batchSender.js';
+import { enqueueEmailBatch } from './handlers/batchSender.js';
+import { processEmailQueue } from './handlers/queueConsumer.js';
 
 function getAddressDomain(address = '') {
   return String(address).split('@')[1]?.toLowerCase() || 'unknown';
@@ -38,13 +39,18 @@ export default {
 
       const emailPayloads = await buildEmailPayloads(parsed, recipients, env, message);
       
-      await sendEmailBatch(emailPayloads, env, logContext);
-    } catch (error) {
+      await enqueueEmailBatch(emailPayloads, env, logContext);
+    } catch {
       console.error('email.failed', {
-        message: error.message,
-        stack: error.stack,
+        code: 'EMAIL_PROCESSING_FAILED',
       });
+      const error = new Error('Email processing failed');
+      error.name = 'EmailProcessingError';
       throw error;
     }
+  },
+
+  async queue(batch, env) {
+    await processEmailQueue(batch, env);
   },
 };

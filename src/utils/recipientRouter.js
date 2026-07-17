@@ -1,8 +1,10 @@
+import { addressParser } from 'postal-mime';
+
 function getEmailAddress(value = '') {
   const trimmed = String(value).trim();
-  const addressMatch = trimmed.match(/<([^>]+)>/);
+  const [parsedAddress] = addressParser(trimmed, { flatten: true });
 
-  return (addressMatch?.[1] || trimmed).trim();
+  return (parsedAddress?.address || trimmed).trim();
 }
 
 function assertValidEmail(value, fieldName = 'email') {
@@ -23,18 +25,19 @@ export function parseEmailList(value = '', fieldName = 'email list') {
     return [];
   }
 
-  if (Array.isArray(value)) {
-    return value
-      .map(email => String(email).trim())
-      .filter(email => email)
-      .map(email => assertValidEmail(email, fieldName));
-  }
+  const values = Array.isArray(value) ? value : [value];
 
-  return String(value)
-    .split(',')
-    .map(email => email.trim())
-    .filter(email => email)
-    .map(email => assertValidEmail(email, fieldName));
+  return values.flatMap(email => {
+    const rawEmail = String(email).trim();
+    if (!rawEmail) {
+      return [];
+    }
+
+    return addressParser(rawEmail, { flatten: true })
+      .map(parsedAddress => parsedAddress.address || parsedAddress.name || rawEmail)
+      .filter(address => address)
+      .map(address => assertValidEmail(address, fieldName));
+  });
 }
 
 function normalizeEmail(value = '') {

@@ -10,6 +10,9 @@
   "vars": {
     "FROM_NAME": "Example notifications",
     "FROM_EMAIL": "noreply@example.com",
+    "RESEND_RATE_MAX_REQUESTS": 5,
+    "RESEND_RATE_WINDOW_MS": 3000,
+    "EMAIL_DLQ_NAME": "email-router-dlq",
     "MAILBOX_CONFIG": {
       "billing": {
         "address": "billing@example.com",
@@ -28,6 +31,32 @@
 
   "secrets": {
     "required": ["RESEND_API_KEY"]
+  },
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "EMAIL_SEND_QUEUE",
+        "queue": "email-router-send"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "email-router-send",
+        "max_batch_size": 5,
+        "max_batch_timeout": 3,
+        "max_retries": 5,
+        "dead_letter_queue": "email-router-dlq",
+        "max_concurrency": 1,
+        "retry_delay": 60
+      },
+      {
+        "queue": "email-router-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
   },
 
   "observability": {

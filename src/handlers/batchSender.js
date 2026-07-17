@@ -1,47 +1,66 @@
-import { sendWithRetry } from './sendEmail.js';
-import { resendSendRate } from '../utils/rateLimiter.js';
+const QUEUE_MESSAGE_VERSION = 1;
 
-export async function sendEmailBatch(emailPayloads, env, context = {}) {
-  const batchSize = resendSendRate.maxRequests;
-  const batchDelayMs = resendSendRate.timeWindowMs;
-  const totalBatches = Math.ceil(emailPayloads.length / batchSize);
+function getAddressDomain(address = '') {
+  return String(address).split('@')[1]?.toLowerCase() || 'unknown';
+}
 
-  for (let i = 0; i < emailPayloads.length; i += batchSize) {
-    const batch = emailPayloads.slice(i, i + batchSize);
-    const batchNumber = Math.floor(i / batchSize) + 1;
+function sanitizeContext(context = {}) {
+  return {
+    mailbox: context.mailbox || 'unknown',
+    route: context.route || 'unknown',
+    fromDomain: context.fromDomain || 'unknown',
+    rawSize: Number.isFinite(context.rawSize) ? context.rawSize : undefined,
+  };
+}
 
-    console.log('email.batch.started', {
-      ...context,
-      batchNumber,
-      totalBatches,
-      batchSize: batch.length,
-    });
-    
-    const emailPromises = batch.map(({ payload, idempotencyKey }) => 
-      sendWithRetry(payload, env, idempotencyKey)
-    );
+function createQueueMessage({ payload, idempotencyKey }, context) {
+  return {
+    version: QUEUE_MESSAGE_VERSION,
+    payload,
+    idempotencyKey,
+    context: sanitizeContext(context),
+    recipientDomain: getAddressDomain(payload?.to),
+  };
+}
 
-    await Promise.all(emailPromises);
-
-    console.log('email.batch.sent', {
-      ...context,
-      batchNumber,
-      totalBatches,
-      batchSize: batch.length,
-    });
-    
-    if (i + batchSize < emailPayloads.length) {
-      console.log('email.batch.waiting', {
-        ...context,
-        batchNumber,
-        waitMs: batchDelayMs,
-      });
-      await new Promise(resolve => setTimeout(resolve, batchDelayMs));
-    }
+export async function enqueueEmailBatch(emailPayloads, env, context = {}) {
+  if (!env.EMAIL_SEND_QUEUE?.send) {
+    const error = new Error('EMAIL_SEND_QUEUE binding is required');
+    error.name = 'EmailQueueConfigurationError';
+    throw error;
   }
-  
-  console.log('email.sent', {
-    ...context,
-    recipientCount: emailPayloads.length,
+
+  let queuedCount = 0;
+
+  for (const emailPayload of emailPayloads) {
+    await env.EMAIL_SEND_QUEUE.send(createQueueMessage(emailPayload, context), {
+      contentType: 'json',
+    });
+    queuedCount += 1;
+  }
+
+  console.log('email.queued', {
+    ...sanitizeContext(context),
+    queuedCount,
   });
+
+  return { queuedCount };
+}
+
+export function assertValidQueueMessage(body) {
+  const isValid =
+    body?.version === QUEUE_MESSAGE_VERSION &&
+    body.payload &&
+    typeof body.payload === 'object' &&
+    typeof body.payload.to === 'string' &&
+    typeof body.idempotencyKey === 'string' &&
+    body.idempotencyKey.length > 0;
+
+  if (!isValid) {
+    const error = new Error('Invalid email queue message');
+    error.name = 'InvalidEmailQueueMessageError';
+    throw error;
+  }
+
+  return body;
 }

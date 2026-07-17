@@ -1,24 +1,45 @@
 import { sleep } from '../utils/sleep.js';
-import { resendRateLimiter } from '../utils/rateLimiter.js';
+import { createResendRateLimiter } from '../utils/rateLimiter.js';
 
 function getAddressDomain(address = '') {
   return String(address).split('@')[1]?.toLowerCase() || 'unknown';
 }
 
-export async function sendWithRetry(payload, env, idempotencyKey) {
+function createResendError(status) {
+  const error = new Error(`Resend request failed with status ${status}`);
+  error.name = 'ResendRequestError';
+  error.status = status;
+  return error;
+}
+
+function createNetworkError() {
+  const error = new Error('Resend network request failed');
+  error.name = 'ResendNetworkError';
+  return error;
+}
+
+function getErrorName(error) {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+export async function sendWithRetry(payload, env, idempotencyKey, options = {}) {
   if (!env.RESEND_API_KEY) {
     throw new Error('RESEND_API_KEY is required');
   }
 
   const maxAttempts = 2;
-  let lastErrText = '';
+  const request = options.fetch || fetch;
+  const wait = options.sleep || sleep;
+  const random = options.random || Math.random;
+  const rateLimiter = options.rateLimiter || createResendRateLimiter(env);
+  let lastStatus;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let res;
     try {
-      await resendRateLimiter.waitForSlot();
+      await rateLimiter.waitForSlot();
       
-      res = await fetch('https://api.resend.com/emails', {
+      res = await request('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${env.RESEND_API_KEY}`,
@@ -35,12 +56,12 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
           attempt: attempt + 1,
           maxAttempts,
           recipientDomain: getAddressDomain(payload.to),
-          message: e.message,
+          errorName: getErrorName(e),
         });
-        throw e;
+        throw createNetworkError();
       }
 
-      const jitter = Math.floor(Math.random() * 200);
+      const jitter = Math.floor(random() * 200);
       const waitMs = 500 * Math.pow(2, attempt) + jitter;
 
       console.warn('resend.network_retry', {
@@ -48,10 +69,10 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
         maxAttempts,
         waitMs,
         recipientDomain: getAddressDomain(payload.to),
-        message: e.message,
+        errorName: getErrorName(e),
       });
 
-      await sleep(waitMs);
+      await wait(waitMs);
       continue;
     }
 
@@ -60,7 +81,7 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
     }
 
     const errText = await res.text().catch(() => '');
-    lastErrText = errText;
+    lastStatus = res.status;
 
     const shouldRetry = res.status === 429 || (res.status >= 500 && res.status <= 599);
 
@@ -70,9 +91,9 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
         attempt: attempt + 1,
         maxAttempts,
         recipientDomain: getAddressDomain(payload.to),
-        responseBody: errText.slice(0, 500),
+        responseBodyLength: errText.length,
       });
-      throw new Error(`Resend ${res.status}: ${errText}`);
+      throw createResendError(res.status);
     }
 
     const retryAfter = res.headers.get('retry-after');
@@ -89,7 +110,7 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
       }
     }
     const backoff = waitMs * Math.pow(2, attempt);
-    const jitter = Math.floor(Math.random() * 200);
+    const jitter = Math.floor(random() * 200);
     const retryWaitMs = Math.min(5000, Math.max(500, backoff)) + jitter;
 
     console.warn('resend.retry', {
@@ -100,8 +121,8 @@ export async function sendWithRetry(payload, env, idempotencyKey) {
       recipientDomain: getAddressDomain(payload.to),
     });
 
-    await sleep(retryWaitMs);
+    await wait(retryWaitMs);
   }
 
-  throw new Error(`Resend: ${lastErrText || 'Falha desconhecida'}`);
+  throw createResendError(lastStatus || 'unknown');
 }

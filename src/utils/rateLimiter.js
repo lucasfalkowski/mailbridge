@@ -1,43 +1,74 @@
 import { sleep } from './sleep.js';
 
-export const resendSendRate = {
-  maxRequests: 5,
-  timeWindowMs: 3000,
-};
+const DEFAULT_MAX_REQUESTS = 5;
+const DEFAULT_TIME_WINDOW_MS = 3000;
 
-class RateLimiter {
-  constructor(maxRequests, timeWindowMs) {
-    this.maxRequests = maxRequests;
-    this.timeWindowMs = timeWindowMs;
-    this.requests = [];
+function parsePositiveInteger(value, fallback, name) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+export function getResendSendRate(env = {}) {
+  return {
+    maxRequests: parsePositiveInteger(
+      env.RESEND_RATE_MAX_REQUESTS,
+      DEFAULT_MAX_REQUESTS,
+      'RESEND_RATE_MAX_REQUESTS',
+    ),
+    timeWindowMs: parsePositiveInteger(
+      env.RESEND_RATE_WINDOW_MS,
+      DEFAULT_TIME_WINDOW_MS,
+      'RESEND_RATE_WINDOW_MS',
+    ),
+  };
+}
+
+export class RateLimiter {
+  constructor(maxRequests, timeWindowMs, wait = sleep, now = Date.now) {
+    this.intervalMs = Math.ceil(timeWindowMs / maxRequests);
+    this.wait = wait;
+    this.now = now;
+    this.nextSlotAt = 0;
     this.queue = Promise.resolve();
   }
 
   async waitForSlot() {
-    this.queue = this.queue.then(() => this.#acquire());
+    this.queue = this.queue.then(async () => {
+      const waitMs = Math.max(0, this.nextSlotAt - this.now());
+      if (waitMs > 0) {
+        console.log('resend.rate_limit_wait', { waitMs });
+        await this.wait(waitMs);
+      }
+
+      this.nextSlotAt = this.now() + this.intervalMs;
+    });
+
     return this.queue;
   }
 
-  async #acquire() {
-    const now = Date.now();
-
-    this.requests = this.requests.filter(time => now - time < this.timeWindowMs);
-
-    if (this.requests.length >= this.maxRequests) {
-      const oldestRequest = this.requests[0];
-      const waitTime = Math.max(0, this.timeWindowMs - (now - oldestRequest));
-      if (waitTime > 0) {
-        console.log('resend.rate_limit_wait', { waitMs: waitTime });
-        await sleep(waitTime);
-      }
-      return this.#acquire();
+  async waitForCooldown() {
+    await this.queue;
+    const waitMs = Math.max(0, this.nextSlotAt - this.now());
+    if (waitMs > 0) {
+      await this.wait(waitMs);
     }
-
-    this.requests.push(Date.now());
   }
 }
 
-export const resendRateLimiter = new RateLimiter(
-  resendSendRate.maxRequests,
-  resendSendRate.timeWindowMs,
-);
+export function createResendRateLimiter(env = {}, options = {}) {
+  const rate = getResendSendRate(env);
+  return new RateLimiter(
+    rate.maxRequests,
+    rate.timeWindowMs,
+    options.sleep,
+    options.now,
+  );
+}
